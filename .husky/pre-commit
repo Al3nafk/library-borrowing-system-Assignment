@@ -1,0 +1,1 @@
+cd services/book-service && export NODE_ENV=test && npm test
