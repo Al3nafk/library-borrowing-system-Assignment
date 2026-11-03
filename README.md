@@ -37,7 +37,7 @@ and their loan limit, and calls book-service to take or return a copy.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Al3nafk/library-borrowing-system ~/library-app
+   git clone https://github.com/Al3nafk/library-borrowing-system-Assignment ~/library-app
    cd ~/library-app
    ```
 2. Create the environment file and set real passwords:
