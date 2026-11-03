@@ -1,0 +1,118 @@
+services:
+  # ---------- Data stores ----------
+  db:
+    image: mysql:8.0
+    container_name: library-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-library_db}
+      MYSQL_USER: ${MYSQL_USER:-library_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks: [library-network]
+
+  mongo:
+    image: mongo:4.4
+    container_name: library-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [library-network]
+
+  redis:
+    image: redis:7-alpine
+    container_name: library-redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [library-network]
+
+  # ---------- Microservices ----------
+  member-service:
+    build: ./services/member-service
+    container_name: library-member-service
+    environment:
+      DB_HOST: db
+      DB_USER: ${MYSQL_USER:-library_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE:-library_db}
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [library-network]
+
+  book-service:
+    build: ./services/book-service
+    container_name: library-book-service
+    environment:
+      DB_HOST: db
+      DB_USER: ${MYSQL_USER:-library_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE:-library_db}
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [library-network]
+
+  loan-service:
+    build: ./services/loan-service
+    container_name: library-loan-service
+    environment:
+      MONGO_URL: mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      MONGO_DB: library_db
+      REDIS_URL: redis://redis:6379
+      MEMBER_SERVICE_URL: http://member-service:3001
+      BOOK_SERVICE_URL: http://book-service:3002
+      BASKET_TTL: ${BASKET_TTL:-1800}
+      LOAN_DAYS: ${LOAN_DAYS:-14}
+      LATE_FEE_PER_DAY: ${LATE_FEE_PER_DAY:-0.50}
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      member-service: { condition: service_started }
+      book-service: { condition: service_started }
+    restart: unless-stopped
+    networks: [library-network]
+
+  api-gateway:
+    build: ./services/api-gateway
+    container_name: library-api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      MEMBER_SERVICE_URL: http://member-service:3001
+      BOOK_SERVICE_URL: http://book-service:3002
+      LOAN_SERVICE_URL: http://loan-service:3003
+    depends_on:
+      - member-service
+      - book-service
+      - loan-service
+    restart: unless-stopped
+    networks: [library-network]
+
+volumes:
+  mysql_data:
+  mongo_data:
+  redis_data:
+
+networks:
+  library-network:
